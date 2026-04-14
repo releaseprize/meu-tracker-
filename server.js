@@ -6,6 +6,7 @@ app.use(express.json());
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 const TIKTOK_ACCESS_TOKEN = process.env.TIKTOK_ACCESS_TOKEN;
+const TIKTOK_ADVERTISER_ID = process.env.TIKTOK_ADVERTISER_ID;
 const TIKTOK_PIXEL_ID = 'D776I53C77U88469GFRG';
 
 // ─────────────────────────────────────────
@@ -40,12 +41,22 @@ async function sendTikTokPurchase(sale) {
     return;
   }
 
+  if (!TIKTOK_ADVERTISER_ID) {
+    console.warn('[TikTok] TIKTOK_ADVERTISER_ID não configurado — pulando envio');
+    return;
+  }
+
+  // Log de debug para verificar token
+  console.log('[TikTok] Token (primeiros 10 chars):', TIKTOK_ACCESS_TOKEN?.slice(0, 10));
+  console.log('[TikTok] Advertiser ID:', TIKTOK_ADVERTISER_ID);
+
   const hashedEmail = sale.customer_email
     ? crypto.createHash('sha256').update(sale.customer_email.trim().toLowerCase()).digest('hex')
     : undefined;
 
   const payload = {
     pixel_code: TIKTOK_PIXEL_ID,
+    advertiser_id: TIKTOK_ADVERTISER_ID,
     event: 'Purchase',
     event_id: sale.order_id,
     timestamp: new Date().toISOString(),
@@ -69,6 +80,8 @@ async function sendTikTokPurchase(sale) {
   };
 
   try {
+    console.log('[TikTok] Enviando payload:', JSON.stringify(payload, null, 2));
+
     const res = await fetch('https://business-api.tiktok.com/open_api/v1.3/pixel/track/', {
       method: 'POST',
       headers: {
@@ -103,8 +116,6 @@ app.post('/webhook/ironpay', async (req, res) => {
     const customer    = body.customer    || {};
     const offer       = body.offer       || {};
 
-    // A IronPay envia os UTMs direto no objeto tracking
-    // tracking.src é o sid que você passou na URL do checkout
     const sale = {
       session_id:     tracking.src          || null,
       gateway:        'ironpay',

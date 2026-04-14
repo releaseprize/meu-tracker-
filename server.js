@@ -16,41 +16,6 @@ app.get('/ping', (req, res) => {
 });
 
 // ─────────────────────────────────────────
-// HELPER — salva visitante no Supabase
-// ─────────────────────────────────────────
-async function upsertVisitor(payload) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/visitors`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'apikey': SUPABASE_KEY,
-      'Authorization': `Bearer ${SUPABASE_KEY}`,
-      'Prefer': 'resolution=merge-duplicates'
-    },
-    body: JSON.stringify(payload)
-  });
-  return res.ok;
-}
-
-// ─────────────────────────────────────────
-// HELPER — busca UTMs pelo session_id
-// ─────────────────────────────────────────
-async function getUtmsBySessionId(sessionId) {
-  if (!sessionId) return {};
-  const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/visitors?session_id=eq.${encodeURIComponent(sessionId)}&limit=1`,
-    {
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`
-      }
-    }
-  );
-  const data = await res.json();
-  return data && data[0] ? data[0] : {};
-}
-
-// ─────────────────────────────────────────
 // HELPER — salva venda no Supabase
 // ─────────────────────────────────────────
 async function saveSale(payload) {
@@ -75,7 +40,6 @@ async function sendTikTokPurchase(sale) {
     return;
   }
 
-  // TikTok exige e-mail hasheado em SHA-256
   const hashedEmail = sale.customer_email
     ? crypto.createHash('sha256').update(sale.customer_email.trim().toLowerCase()).digest('hex')
     : undefined;
@@ -83,7 +47,7 @@ async function sendTikTokPurchase(sale) {
   const payload = {
     pixel_code: TIKTOK_PIXEL_ID,
     event: 'Purchase',
-    event_id: sale.order_id,           // usado pelo TikTok para deduplicar com o pixel client-side
+    event_id: sale.order_id,
     timestamp: new Date().toISOString(),
     context: {
       user: {
@@ -92,7 +56,7 @@ async function sendTikTokPurchase(sale) {
     },
     properties: {
       order_id: sale.order_id,
-      value: sale.amount,              // em reais, formato decimal (ex: 97.00)
+      value: sale.amount,
       currency: 'BRL',
       contents: [
         {
@@ -134,37 +98,28 @@ app.post('/webhook/ironpay', async (req, res) => {
     const body = req.body;
     console.log('[IronPay] Webhook recebido:', JSON.stringify(body, null, 2));
 
-    // IronPay envia o session_id que você passou na URL do checkout
-    // Ex: https://checkout.ironpay.com.br/SEU_PRODUTO?sid=SESSION_ID
-    const sessionId =
-      body.sid ||
-      body.tracker ||
-      body.metadata?.sid ||
-      body.custom?.sid ||
-      null;
+    const tracking    = body.tracking    || {};
+    const transaction = body.transaction || {};
+    const customer    = body.customer    || {};
+    const offer       = body.offer       || {};
 
-    // Busca UTMs pelo session_id
-    const utms = await getUtmsBySessionId(sessionId);
-
-    // Monta payload da venda
+    // A IronPay envia os UTMs direto no objeto tracking
+    // tracking.src é o sid que você passou na URL do checkout
     const sale = {
-      session_id:     sessionId,
+      session_id:     tracking.src          || null,
       gateway:        'ironpay',
-      order_id:       body.id || body.order_id || body.transaction_id || null,
-      product_name:   body.product?.name || body.plan?.name || body.description || null,
-      amount:         body.amount
-                        ? body.amount / 100   // IronPay envia em centavos
-                        : body.total || null,
-      status:         body.status || body.event || null,
-      customer_email: body.customer?.email || body.email || null,
-      utm_source:     utms.utm_source   || null,
-      utm_medium:     utms.utm_medium   || null,
-      utm_campaign:   utms.utm_campaign || null,
-      utm_content:    utms.utm_content  || null,
-      utm_term:       utms.utm_term     || null
+      order_id:       transaction.id        || null,
+      product_name:   offer.title           || null,
+      amount:         transaction.amount ? transaction.amount / 100 : null,
+      status:         transaction.status    || null,
+      customer_email: customer.email        || null,
+      utm_source:     tracking.utm_source   || null,
+      utm_medium:     tracking.utm_medium   || null,
+      utm_campaign:   tracking.utm_campaign || null,
+      utm_content:    tracking.utm_content  || null,
+      utm_term:       tracking.utm_term     || null
     };
 
-    // Salva no Supabase
     const saved = await saveSale(sale);
 
     if (saved) {
@@ -173,8 +128,7 @@ app.post('/webhook/ironpay', async (req, res) => {
       console.error('[IronPay] ❌ Erro ao salvar venda no Supabase');
     }
 
-    // ── Dispara Purchase no TikTok apenas se pagamento aprovado ──
-    // Ajuste os status conforme o que a IronPay envia no seu plano
+    // Dispara Purchase no TikTok apenas se pagamento aprovado
     const STATUS_APROVADOS = ['paid', 'approved', 'complete', 'completed', 'success', 'active'];
     const statusAprovado = STATUS_APROVADOS.includes((sale.status || '').toLowerCase());
 
@@ -192,14 +146,14 @@ app.post('/webhook/ironpay', async (req, res) => {
 });
 
 // ─────────────────────────────────────────
-// ROTA DE TESTE — verifica se está online
+// ROTA DE TESTE
 // ─────────────────────────────────────────
 app.get('/', (req, res) => {
   res.json({
     status: 'Tracker online ✅',
     endpoints: {
-      ping:     'GET /ping',
-      ironpay:  'POST /webhook/ironpay'
+      ping:    'GET /ping',
+      ironpay: 'POST /webhook/ironpay'
     }
   });
 });

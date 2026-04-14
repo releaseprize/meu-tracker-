@@ -3,8 +3,8 @@ const express = require('express');
 const app = express();
 app.use(express.json());
 
-const SUPABASE_URL = 'https://SEU_PROJECT_URL.supabase.co';
-const SUPABASE_KEY = 'SUA_ANON_KEY';
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_KEY;
 
 app.post('/webhook', async (req, res) => {
   const body = req.body;

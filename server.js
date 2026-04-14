@@ -46,7 +46,6 @@ async function sendTikTokPurchase(sale) {
     return;
   }
 
-  // Log de debug para verificar token
   console.log('[TikTok] Token (primeiros 10 chars):', TIKTOK_ACCESS_TOKEN?.slice(0, 10));
   console.log('[TikTok] Advertiser ID:', TIKTOK_ADVERTISER_ID);
 
@@ -54,26 +53,30 @@ async function sendTikTokPurchase(sale) {
     ? crypto.createHash('sha256').update(sale.customer_email.trim().toLowerCase()).digest('hex')
     : undefined;
 
+  // Timestamp em Unix seconds (string) — formato obrigatório pela API v1.3
+  const timestampSeconds = Math.floor(Date.now() / 1000).toString();
+
   const payload = {
     pixel_code: TIKTOK_PIXEL_ID,
     advertiser_id: TIKTOK_ADVERTISER_ID,
     event: 'Purchase',
     event_id: sale.order_id,
-    timestamp: new Date().toISOString(),
+    timestamp: timestampSeconds,
     context: {
       user: {
         ...(hashedEmail && { email: hashedEmail })
-      }
+      },
+      ad: {}
     },
     properties: {
-      order_id: sale.order_id,
-      value: sale.amount,
       currency: 'BRL',
+      value: String(sale.amount),
       contents: [
         {
+          content_id: sale.order_id || 'produto',
           content_name: sale.product_name || 'Produto',
           quantity: 1,
-          price: sale.amount
+          price: String(sale.amount)
         }
       ]
     }
@@ -91,7 +94,17 @@ async function sendTikTokPurchase(sale) {
       body: JSON.stringify(payload)
     });
 
-    const data = await res.json();
+    // Lê resposta como texto primeiro para evitar crash em Bad Request HTML
+    const text = await res.text();
+    console.log('[TikTok] Resposta bruta:', text);
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      console.error('[TikTok] ❌ Resposta não é JSON válido:', text);
+      return;
+    }
 
     if (data.code === 0) {
       console.log('[TikTok] ✅ Evento Purchase enviado — order_id:', sale.order_id);
@@ -139,7 +152,6 @@ app.post('/webhook/ironpay', async (req, res) => {
       console.error('[IronPay] ❌ Erro ao salvar venda no Supabase');
     }
 
-    // Dispara Purchase no TikTok apenas se pagamento aprovado
     const STATUS_APROVADOS = ['paid', 'approved', 'complete', 'completed', 'success', 'active'];
     const statusAprovado = STATUS_APROVADOS.includes((sale.status || '').toLowerCase());
 
